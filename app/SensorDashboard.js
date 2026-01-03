@@ -193,12 +193,6 @@ export default function SensorDashboard() {
         ],
       },
       {
-        key: "TYPE_ACCELEROMETER_UNCALIBRATED",
-        category: "Motion",
-        label: "Accelerometer (uncalibrated)",
-        webStrategies: [{ id: "unavailable", label: "Not available on the open web" }],
-      },
-      {
         key: "TYPE_GRAVITY",
         category: "Motion",
         label: "Gravity",
@@ -226,12 +220,6 @@ export default function SensorDashboard() {
         ],
       },
       {
-        key: "TYPE_GYROSCOPE_UNCALIBRATED",
-        category: "Motion",
-        label: "Gyroscope (uncalibrated)",
-        webStrategies: [{ id: "unavailable", label: "Not available on the open web" }],
-      },
-      {
         key: "TYPE_ROTATION_VECTOR",
         category: "Motion",
         label: "Rotation vector",
@@ -239,37 +227,6 @@ export default function SensorDashboard() {
           { id: "AbsoluteOrientationSensor", label: "Generic Sensor: AbsoluteOrientationSensor" },
           { id: "DeviceOrientation", label: "DeviceOrientationEvent" },
         ],
-      },
-      {
-        key: "TYPE_SIGNIFICANT_MOTION",
-        category: "Motion",
-        label: "Significant motion",
-        webStrategies: [{ id: "unavailable", label: "Not available on the open web" }],
-      },
-      {
-        key: "TYPE_STEP_COUNTER",
-        category: "Motion",
-        label: "Step counter",
-        webStrategies: [{ id: "unavailable", label: "Not available on the open web" }],
-      },
-      {
-        key: "TYPE_STEP_DETECTOR",
-        category: "Motion",
-        label: "Step detector",
-        webStrategies: [{ id: "unavailable", label: "Not available on the open web" }],
-      },
-
-      {
-        key: "TYPE_MAGNETIC_FIELD",
-        category: "Position",
-        label: "Geomagnetic field (magnetometer)",
-        webStrategies: [{ id: "Magnetometer", label: "Generic Sensor: Magnetometer" }],
-      },
-      {
-        key: "TYPE_MAGNETIC_FIELD_UNCALIBRATED",
-        category: "Position",
-        label: "Geomagnetic field (uncalibrated)",
-        webStrategies: [{ id: "unavailable", label: "Not available on the open web" }],
       },
       {
         key: "TYPE_ORIENTATION",
@@ -294,12 +251,6 @@ export default function SensorDashboard() {
           { id: "AbsoluteOrientationSensor", label: "Generic Sensor: AbsoluteOrientationSensor" },
           { id: "DeviceOrientation", label: "DeviceOrientationEvent" },
         ],
-      },
-      {
-        key: "TYPE_PROXIMITY",
-        category: "Position",
-        label: "Proximity",
-        webStrategies: [{ id: "unavailable", label: "Not reliably available on the open web" }],
       },
 
       {
@@ -647,9 +598,8 @@ export default function SensorDashboard() {
             Motion + Position Sensors (Web)
           </h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-            This page attempts to start each Android sensor using the closest available Web API. Some Android sensors
-            (step counter, uncalibrated variants, significant motion, proximity, etc.) are not reliably accessible from
-            a normal website.
+            This page starts the motion/orientation/location APIs that are currently supported by your browser and
+            displays live readings.
           </p>
         </div>
 
@@ -686,10 +636,6 @@ export default function SensorDashboard() {
         <ul className="mt-2 list-disc space-y-1 pl-5">
           <li>Most sensor APIs require HTTPS (secure context) on a real device.</li>
           <li>Some browsers gate motion/orientation behind a user permission prompt.</li>
-          <li>
-            If you need the full Android sensor list (via <code>SensorManager</code>), you’ll need a native Android
-            wrapper (WebView/Capacitor) that bridges sensors into JavaScript.
-          </li>
         </ul>
       </div>
 

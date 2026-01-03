@@ -1,6 +1,6 @@
-This is a Next.js (JavaScript) site that attempts to read motion + position sensors in the browser and display:
+This is a Next.js (JavaScript) site that reads motion/orientation/location sensors in the browser and displays:
 
-- Which sensors are available on the current device/browser
+- Which supported sensor APIs are available on the current device/browser
 - Live sensor readings (when available)
 - Errors/permission issues (when blocked)
 
