@@ -174,9 +174,110 @@ function formatValue(value) {
   return JSON.stringify(value, null, 2);
 }
 
+function degToRad(deg) {
+  return (deg * Math.PI) / 180;
+}
+
+function quatMultiply(a, b) {
+  const [ax, ay, az, aw] = a;
+  const [bx, by, bz, bw] = b;
+  return [
+    aw * bx + ax * bw + ay * bz - az * by,
+    aw * by - ax * bz + ay * bw + az * bx,
+    aw * bz + ax * by - ay * bx + az * bw,
+    aw * bw - ax * bx - ay * by - az * bz,
+  ];
+}
+
+function quatConjugate(q) {
+  return [-q[0], -q[1], -q[2], q[3]];
+}
+
+function quatNormSquared(q) {
+  return q[0] * q[0] + q[1] * q[1] + q[2] * q[2] + q[3] * q[3];
+}
+
+function quatInverse(q) {
+  const n2 = quatNormSquared(q);
+  if (!n2) return null;
+  const c = quatConjugate(q);
+  return [c[0] / n2, c[1] / n2, c[2] / n2, c[3] / n2];
+}
+
+function quaternionFromDeviceOrientationDegrees({ alpha, beta, gamma }) {
+  if (![alpha, beta, gamma].every((v) => typeof v === "number")) return null;
+
+  const a = degToRad(alpha);
+  const b = degToRad(beta);
+  const g = degToRad(gamma);
+
+  const halfA = a / 2;
+  const halfB = b / 2;
+  const halfG = g / 2;
+
+  // DeviceOrientationEvent angles are defined as rotations about:
+  // alpha: z-axis, beta: x-axis, gamma: y-axis (degrees).
+  // This produces an approximate quaternion with order q = qz * qx * qy.
+  const qz = [0, 0, Math.sin(halfA), Math.cos(halfA)];
+  const qx = [Math.sin(halfB), 0, 0, Math.cos(halfB)];
+  const qy = [0, Math.sin(halfG), 0, Math.cos(halfG)];
+
+  return quatMultiply(quatMultiply(qz, qx), qy);
+}
+
+function startDeviceOrientationQuaternion({ mode, onData, onError }) {
+  if (typeof window === "undefined" || typeof DeviceOrientationEvent === "undefined") {
+    throw new Error("DeviceOrientationEvent is not available in this browser");
+  }
+
+  let baseline = null;
+
+  const handler = (e) => {
+    try {
+      const alpha = e.alpha ?? null;
+      const beta = e.beta ?? null;
+      const gamma = e.gamma ?? null;
+      const q = quaternionFromDeviceOrientationDegrees({
+        alpha: typeof alpha === "number" ? alpha : null,
+        beta: typeof beta === "number" ? beta : null,
+        gamma: typeof gamma === "number" ? gamma : null,
+      });
+
+      if (!q) return;
+
+      if (mode === "relative") {
+        if (!baseline) baseline = q;
+        const inv = quatInverse(baseline);
+        if (!inv) return;
+        onData({
+          quaternion: quatMultiply(inv, q),
+          units: "unit quaternion",
+          note: "derived from DeviceOrientationEvent (relative to start)",
+        });
+        return;
+      }
+
+      onData({
+        quaternion: q,
+        units: "unit quaternion",
+        note: "derived from DeviceOrientationEvent (approx)",
+      });
+    } catch (err) {
+      onError(err);
+    }
+  };
+
+  window.addEventListener("deviceorientation", handler);
+
+  return () => {
+    window.removeEventListener("deviceorientation", handler);
+  };
+}
+
 export default function SensorDashboard() {
   const stopFnsRef = useRef(new Map());
   const lastUiUpdateRef = useRef(new Map());
+  const permissionRef = useRef({ motion: null, orientation: null });
 
   const [rows, setRows] = useState(() => ({}));
   const [env, setEnv] = useState(null);
@@ -184,79 +285,97 @@ export default function SensorDashboard() {
   const defs = useMemo(
     () => [
       {
-        key: "TYPE_ACCELEROMETER",
+        id: "acceleration_including_gravity",
         category: "Motion",
-        label: "Accelerometer",
+        label: "Acceleration (including gravity)",
+        android: "TYPE_ACCELEROMETER",
+        ios: "CMAccelerometerData / CMDeviceMotion",
         webStrategies: [
           { id: "Accelerometer", label: "Generic Sensor: Accelerometer" },
           { id: "DeviceMotion.accelerationIncludingGravity", label: "DeviceMotion: accelerationIncludingGravity" },
         ],
       },
       {
-        key: "TYPE_GRAVITY",
+        id: "gravity",
         category: "Motion",
         label: "Gravity",
+        android: "TYPE_GRAVITY",
+        ios: "CMDeviceMotion.gravity",
         webStrategies: [
           { id: "GravitySensor", label: "Generic Sensor: GravitySensor" },
           { id: "DeviceMotion.derivedGravity", label: "DeviceMotion: derived (incl. gravity - linear accel)" },
         ],
       },
       {
-        key: "TYPE_LINEAR_ACCELERATION",
+        id: "linear_acceleration",
         category: "Motion",
         label: "Linear acceleration",
+        android: "TYPE_LINEAR_ACCELERATION",
+        ios: "CMDeviceMotion.userAcceleration",
         webStrategies: [
           { id: "LinearAccelerationSensor", label: "Generic Sensor: LinearAccelerationSensor" },
           { id: "DeviceMotion.acceleration", label: "DeviceMotion: acceleration" },
         ],
       },
       {
-        key: "TYPE_GYROSCOPE",
+        id: "rotation_rate",
         category: "Motion",
-        label: "Gyroscope",
+        label: "Rotation rate (gyroscope)",
+        android: "TYPE_GYROSCOPE",
+        ios: "CMGyroData / CMDeviceMotion.rotationRate",
         webStrategies: [
           { id: "Gyroscope", label: "Generic Sensor: Gyroscope" },
           { id: "DeviceMotion.rotationRate", label: "DeviceMotion: rotationRate" },
         ],
       },
       {
-        key: "TYPE_ROTATION_VECTOR",
-        category: "Motion",
-        label: "Rotation vector",
+        id: "rotation_vector_quaternion",
+        category: "Orientation",
+        label: "Rotation vector (quaternion)",
+        android: "TYPE_ROTATION_VECTOR",
+        ios: "CMDeviceMotion.attitude (quaternion)",
         webStrategies: [
           { id: "AbsoluteOrientationSensor", label: "Generic Sensor: AbsoluteOrientationSensor" },
-          { id: "DeviceOrientation", label: "DeviceOrientationEvent" },
+          { id: "DeviceOrientationQuaternion.absolute", label: "Derived: DeviceOrientationEvent → quaternion" },
         ],
       },
       {
-        key: "TYPE_ORIENTATION",
-        category: "Position",
-        label: "Orientation (deprecated on Android)",
+        id: "geomagnetic_rotation_vector_quaternion",
+        category: "Orientation",
+        label: "Geomagnetic rotation vector (quaternion)",
+        android: "TYPE_GEOMAGNETIC_ROTATION_VECTOR",
+        ios: "CMDeviceMotion.attitude (quaternion)",
+        webStrategies: [
+          { id: "AbsoluteOrientationSensor", label: "Generic Sensor: AbsoluteOrientationSensor" },
+          { id: "DeviceOrientationQuaternion.absolute", label: "Derived: DeviceOrientationEvent → quaternion" },
+        ],
+      },
+      {
+        id: "orientation_euler",
+        category: "Orientation",
+        label: "Orientation (alpha/beta/gamma)",
+        android: "TYPE_ORIENTATION (deprecated)",
+        ios: "CMAttitude (roll/pitch/yaw)",
         webStrategies: [{ id: "DeviceOrientation", label: "DeviceOrientationEvent" }],
       },
       {
-        key: "TYPE_GAME_ROTATION_VECTOR",
-        category: "Position",
-        label: "Game rotation vector",
+        id: "orientation_quaternion_relative",
+        category: "Orientation",
+        label: "Orientation (quaternion, relative)",
+        android: "TYPE_GAME_ROTATION_VECTOR",
+        ios: "CMAttitude (relative changes)",
         webStrategies: [
           { id: "RelativeOrientationSensor", label: "Generic Sensor: RelativeOrientationSensor" },
-          { id: "DeviceOrientation", label: "DeviceOrientationEvent" },
-        ],
-      },
-      {
-        key: "TYPE_GEOMAGNETIC_ROTATION_VECTOR",
-        category: "Position",
-        label: "Geomagnetic rotation vector",
-        webStrategies: [
-          { id: "AbsoluteOrientationSensor", label: "Generic Sensor: AbsoluteOrientationSensor" },
-          { id: "DeviceOrientation", label: "DeviceOrientationEvent" },
+          { id: "DeviceOrientationQuaternion.relative", label: "Derived: DeviceOrientationEvent → quaternion (relative)" },
         ],
       },
 
       {
-        key: "GEOLOCATION",
-        category: "Position",
+        id: "geolocation",
+        category: "Location",
         label: "Geolocation (GPS/network)",
+        android: "Location (GPS/network)",
+        ios: "Core Location (CLLocationManager)",
         webStrategies: [{ id: "Geolocation", label: "Web API: navigator.geolocation" }],
       },
     ],
@@ -289,7 +408,6 @@ export default function SensorDashboard() {
     switch (strategyId) {
       case "Accelerometer":
       case "Gyroscope":
-      case "Magnetometer":
       case "GravitySensor":
       case "LinearAccelerationSensor":
       case "AbsoluteOrientationSensor":
@@ -301,12 +419,28 @@ export default function SensorDashboard() {
       case "DeviceMotion.derivedGravity":
         return typeof DeviceMotionEvent !== "undefined";
       case "DeviceOrientation":
+      case "DeviceOrientationQuaternion.absolute":
+      case "DeviceOrientationQuaternion.relative":
         return typeof DeviceOrientationEvent !== "undefined";
       case "Geolocation":
         return typeof navigator !== "undefined" && !!navigator.geolocation;
       default:
         return false;
     }
+  }, []);
+
+  const ensureMotionPermission = useCallback(async () => {
+    if (!permissionRef.current.motion) {
+      permissionRef.current.motion = requestMotionPermissionIfNeeded();
+    }
+    return permissionRef.current.motion;
+  }, []);
+
+  const ensureOrientationPermission = useCallback(async () => {
+    if (!permissionRef.current.orientation) {
+      permissionRef.current.orientation = requestOrientationPermissionIfNeeded();
+    }
+    return permissionRef.current.orientation;
   }, []);
 
   const stop = useCallback(
@@ -344,11 +478,11 @@ export default function SensorDashboard() {
     async (key) => {
       stop(key);
 
-      const def = defs.find((d) => d.key === key);
+      const def = defs.find((d) => d.id === key);
       if (!def) return;
 
-      const supported = def.webStrategies.find((s) => detectSupport(s.id));
-      if (!supported || supported.id === "unavailable") {
+      const supportedStrategies = def.webStrategies.filter((s) => detectSupport(s.id));
+      if (!supportedStrategies.length) {
         updateRow(key, {
           status: "unavailable",
           error: { name: "Unsupported", message: "No supported Web API for this sensor on this browser." },
@@ -356,123 +490,150 @@ export default function SensorDashboard() {
         return;
       }
 
-      updateRow(key, { status: "starting", error: null, strategy: supported.label });
+      updateRow(key, { status: "starting", error: null, strategy: null });
 
-      try {
-        let stopFn = null;
+      let lastErr = null;
 
-        if (supported.id.startsWith("DeviceMotion")) {
-          const perm = await requestMotionPermissionIfNeeded();
-          if (!perm.ok) throw new Error("Motion permission was not granted.");
+      for (const strategy of supportedStrategies) {
+        updateRow(key, { status: "starting", error: null, strategy: strategy.label });
+        try {
+          let stopFn = null;
 
-          stopFn = startDeviceMotion({
-            onData: (data) => {
-              if (supported.id === "DeviceMotion.accelerationIncludingGravity") {
-                updateReadingThrottled(key, data.accelerationIncludingGravity);
-              } else if (supported.id === "DeviceMotion.acceleration") {
-                updateReadingThrottled(key, data.acceleration);
-              } else if (supported.id === "DeviceMotion.rotationRate") {
-                updateReadingThrottled(key, data.rotationRate);
-              } else if (supported.id === "DeviceMotion.derivedGravity") {
-                const ag = data.accelerationIncludingGravity;
-                const a = data.acceleration;
-                if (!ag || !a) return;
-                updateReadingThrottled(key, {
-                  x: ag.x != null && a.x != null ? ag.x - a.x : null,
-                  y: ag.y != null && a.y != null ? ag.y - a.y : null,
-                  z: ag.z != null && a.z != null ? ag.z - a.z : null,
-                  units: "m/s²",
-                  note: "derived from DeviceMotion (includingGravity - acceleration)",
-                });
-              }
-            },
-          });
-        } else if (supported.id === "DeviceOrientation") {
-          const perm = await requestOrientationPermissionIfNeeded();
-          if (!perm.ok) throw new Error("Orientation permission was not granted.");
+          if (strategy.id.startsWith("DeviceMotion")) {
+            const perm = await ensureMotionPermission();
+            if (!perm.ok) throw new Error("Motion permission was not granted.");
 
-          stopFn = startDeviceOrientation({
-            onData: (data) => updateReadingThrottled(key, data),
-          });
-        } else if (supported.id === "Geolocation") {
-          stopFn = startGeolocation({
-            onData: (data) => updateReadingThrottled(key, data),
-            onError: (err) => updateRow(key, { status: "error", error: safeError(err) }),
-          });
-        } else if (supported.id === "Accelerometer") {
-          stopFn = startGenericSensor({
-            ctorName: "Accelerometer",
-            options: { frequency: 60 },
-            read: (s) => ({ x: s.x, y: s.y, z: s.z, units: "m/s²" }),
-            onData: (data) => updateReadingThrottled(key, data),
-            onError: (err) => updateRow(key, { status: "error", error: safeError(err) }),
-          });
-        } else if (supported.id === "LinearAccelerationSensor") {
-          stopFn = startGenericSensor({
-            ctorName: "LinearAccelerationSensor",
-            options: { frequency: 60 },
-            read: (s) => ({ x: s.x, y: s.y, z: s.z, units: "m/s²" }),
-            onData: (data) => updateReadingThrottled(key, data),
-            onError: (err) => updateRow(key, { status: "error", error: safeError(err) }),
-          });
-        } else if (supported.id === "GravitySensor") {
-          stopFn = startGenericSensor({
-            ctorName: "GravitySensor",
-            options: { frequency: 60 },
-            read: (s) => ({ x: s.x, y: s.y, z: s.z, units: "m/s²" }),
-            onData: (data) => updateReadingThrottled(key, data),
-            onError: (err) => updateRow(key, { status: "error", error: safeError(err) }),
-          });
-        } else if (supported.id === "Gyroscope") {
-          stopFn = startGenericSensor({
-            ctorName: "Gyroscope",
-            options: { frequency: 60 },
-            read: (s) => ({ x: s.x, y: s.y, z: s.z, units: "rad/s" }),
-            onData: (data) => updateReadingThrottled(key, data),
-            onError: (err) => updateRow(key, { status: "error", error: safeError(err) }),
-          });
-        } else if (supported.id === "Magnetometer") {
-          stopFn = startGenericSensor({
-            ctorName: "Magnetometer",
-            options: { frequency: 20 },
-            read: (s) => ({ x: s.x, y: s.y, z: s.z, units: "μT (approx.)" }),
-            onData: (data) => updateReadingThrottled(key, data),
-            onError: (err) => updateRow(key, { status: "error", error: safeError(err) }),
-          });
-        } else if (supported.id === "AbsoluteOrientationSensor") {
-          stopFn = startGenericSensor({
-            ctorName: "AbsoluteOrientationSensor",
-            options: { frequency: 60 },
-            read: (s) => ({ quaternion: Array.from(s.quaternion || []), units: "unit quaternion" }),
-            onData: (data) => updateReadingThrottled(key, data),
-            onError: (err) => updateRow(key, { status: "error", error: safeError(err) }),
-          });
-        } else if (supported.id === "RelativeOrientationSensor") {
-          stopFn = startGenericSensor({
-            ctorName: "RelativeOrientationSensor",
-            options: { frequency: 60 },
-            read: (s) => ({ quaternion: Array.from(s.quaternion || []), units: "unit quaternion" }),
-            onData: (data) => updateReadingThrottled(key, data),
-            onError: (err) => updateRow(key, { status: "error", error: safeError(err) }),
-          });
-        } else {
-          throw new Error(`Unsupported strategy: ${supported.id}`);
+            stopFn = startDeviceMotion({
+              onData: (data) => {
+                if (strategy.id === "DeviceMotion.accelerationIncludingGravity") {
+                  updateReadingThrottled(key, data.accelerationIncludingGravity);
+                } else if (strategy.id === "DeviceMotion.acceleration") {
+                  updateReadingThrottled(key, data.acceleration);
+                } else if (strategy.id === "DeviceMotion.rotationRate") {
+                  updateReadingThrottled(key, data.rotationRate);
+                } else if (strategy.id === "DeviceMotion.derivedGravity") {
+                  const ag = data.accelerationIncludingGravity;
+                  const a = data.acceleration;
+                  if (!ag || !a) return;
+                  updateReadingThrottled(key, {
+                    x: ag.x != null && a.x != null ? ag.x - a.x : null,
+                    y: ag.y != null && a.y != null ? ag.y - a.y : null,
+                    z: ag.z != null && a.z != null ? ag.z - a.z : null,
+                    units: "m/s²",
+                    note: "derived from DeviceMotion (includingGravity - acceleration)",
+                  });
+                }
+              },
+            });
+          } else if (strategy.id === "DeviceOrientation") {
+            const perm = await ensureOrientationPermission();
+            if (!perm.ok) throw new Error("Orientation permission was not granted.");
+
+            stopFn = startDeviceOrientation({
+              onData: (data) => updateReadingThrottled(key, data),
+            });
+          } else if (strategy.id === "DeviceOrientationQuaternion.absolute") {
+            const perm = await ensureOrientationPermission();
+            if (!perm.ok) throw new Error("Orientation permission was not granted.");
+
+            stopFn = startDeviceOrientationQuaternion({
+              mode: "absolute",
+              onData: (data) => updateReadingThrottled(key, data),
+              onError: (err) => updateRow(key, { error: safeError(err) }),
+            });
+          } else if (strategy.id === "DeviceOrientationQuaternion.relative") {
+            const perm = await ensureOrientationPermission();
+            if (!perm.ok) throw new Error("Orientation permission was not granted.");
+
+            stopFn = startDeviceOrientationQuaternion({
+              mode: "relative",
+              onData: (data) => updateReadingThrottled(key, data),
+              onError: (err) => updateRow(key, { error: safeError(err) }),
+            });
+          } else if (strategy.id === "Geolocation") {
+            stopFn = startGeolocation({
+              onData: (data) => updateReadingThrottled(key, data),
+              onError: (err) => updateRow(key, { status: "error", error: safeError(err) }),
+            });
+          } else if (strategy.id === "Accelerometer") {
+            stopFn = startGenericSensor({
+              ctorName: "Accelerometer",
+              options: { frequency: 60 },
+              read: (s) => ({ x: s.x, y: s.y, z: s.z, units: "m/s²" }),
+              onData: (data) => updateReadingThrottled(key, data),
+              onError: (err) => updateRow(key, { status: "error", error: safeError(err) }),
+            });
+          } else if (strategy.id === "LinearAccelerationSensor") {
+            stopFn = startGenericSensor({
+              ctorName: "LinearAccelerationSensor",
+              options: { frequency: 60 },
+              read: (s) => ({ x: s.x, y: s.y, z: s.z, units: "m/s²" }),
+              onData: (data) => updateReadingThrottled(key, data),
+              onError: (err) => updateRow(key, { status: "error", error: safeError(err) }),
+            });
+          } else if (strategy.id === "GravitySensor") {
+            stopFn = startGenericSensor({
+              ctorName: "GravitySensor",
+              options: { frequency: 60 },
+              read: (s) => ({ x: s.x, y: s.y, z: s.z, units: "m/s²" }),
+              onData: (data) => updateReadingThrottled(key, data),
+              onError: (err) => updateRow(key, { status: "error", error: safeError(err) }),
+            });
+          } else if (strategy.id === "Gyroscope") {
+            stopFn = startGenericSensor({
+              ctorName: "Gyroscope",
+              options: { frequency: 60 },
+              read: (s) => ({ x: s.x, y: s.y, z: s.z, units: "rad/s" }),
+              onData: (data) => updateReadingThrottled(key, data),
+              onError: (err) => updateRow(key, { status: "error", error: safeError(err) }),
+            });
+          } else if (strategy.id === "AbsoluteOrientationSensor") {
+            stopFn = startGenericSensor({
+              ctorName: "AbsoluteOrientationSensor",
+              options: { frequency: 60 },
+              read: (s) => ({ quaternion: Array.from(s.quaternion || []), units: "unit quaternion" }),
+              onData: (data) => updateReadingThrottled(key, data),
+              onError: (err) => updateRow(key, { status: "error", error: safeError(err) }),
+            });
+          } else if (strategy.id === "RelativeOrientationSensor") {
+            stopFn = startGenericSensor({
+              ctorName: "RelativeOrientationSensor",
+              options: { frequency: 60 },
+              read: (s) => ({ quaternion: Array.from(s.quaternion || []), units: "unit quaternion" }),
+              onData: (data) => updateReadingThrottled(key, data),
+              onError: (err) => updateRow(key, { status: "error", error: safeError(err) }),
+            });
+          } else {
+            throw new Error(`Unsupported strategy: ${strategy.id}`);
+          }
+
+          stopFnsRef.current.set(key, stopFn);
+          updateRow(key, { status: "running", error: null });
+          return;
+        } catch (err) {
+          lastErr = safeError(err);
         }
-
-        stopFnsRef.current.set(key, stopFn);
-        updateRow(key, { status: "running", error: null });
-      } catch (err) {
-        updateRow(key, { status: "error", error: safeError(err) });
       }
+
+      updateRow(key, { status: "error", error: lastErr || { name: "Error", message: "Failed to start." } });
     },
-    [defs, detectSupport, stop, updateReadingThrottled, updateRow]
+    [
+      defs,
+      detectSupport,
+      ensureMotionPermission,
+      ensureOrientationPermission,
+      stop,
+      updateReadingThrottled,
+      updateRow,
+    ]
   );
 
   const startAll = useCallback(async () => {
+    await Promise.all([ensureMotionPermission(), ensureOrientationPermission()]);
     for (const def of defs) {
-      await start(def.key);
+      await start(def.id);
     }
-  }, [defs, start]);
+  }, [defs, ensureMotionPermission, ensureOrientationPermission, start]);
 
   useEffect(() => {
     setEnv({
@@ -483,7 +644,7 @@ export default function SensorDashboard() {
     const initial = {};
     for (const def of defs) {
       const supported = def.webStrategies.some((s) => detectSupport(s.id));
-      initial[def.key] = {
+      initial[def.id] = {
         status: "idle",
         supported,
         strategy: null,
@@ -498,10 +659,11 @@ export default function SensorDashboard() {
   }, [defs, detectSupport, stopAllNoState]);
 
   const motion = defs.filter((d) => d.category === "Motion");
-  const position = defs.filter((d) => d.category === "Position");
+  const orientation = defs.filter((d) => d.category === "Orientation");
+  const location = defs.filter((d) => d.category === "Location");
 
   const renderRow = (def) => {
-    const row = rows[def.key] || { status: "idle" };
+    const row = rows[def.id] || { status: "idle" };
     const isRunning = row.status === "running" || row.status === "starting";
     const supported = row.supported;
 
@@ -533,7 +695,8 @@ export default function SensorDashboard() {
 
     return (
       <div
-        key={def.key}
+        id={`sensor-${def.id}`}
+        key={def.id}
         className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-950"
       >
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -541,17 +704,22 @@ export default function SensorDashboard() {
             <div className="flex flex-wrap items-center gap-2">
               <div className="font-semibold text-zinc-900 dark:text-zinc-100">{def.label}</div>
               <Chip tone={tone}>{statusLabel}</Chip>
-              <span className="text-xs text-zinc-500 dark:text-zinc-400">{def.key}</span>
+              <span className="text-xs text-zinc-500 dark:text-zinc-400">{def.id}</span>
             </div>
             <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
               {row.strategy ? `Using: ${row.strategy}` : `Strategies: ${def.webStrategies.map((s) => s.label).join(" • ")}`}
+            </div>
+            <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
+              <span className="font-medium text-zinc-700 dark:text-zinc-300">Android:</span> {def.android || "—"}{" "}
+              <span className="mx-1">•</span> <span className="font-medium text-zinc-700 dark:text-zinc-300">iOS:</span>{" "}
+              {def.ios || "—"}
             </div>
           </div>
 
           <div className="flex shrink-0 items-center gap-2">
             <button
               type="button"
-              onClick={() => start(def.key)}
+              onClick={() => start(def.id)}
               disabled={!supported || isRunning}
               className="inline-flex h-9 items-center rounded-lg bg-zinc-900 px-3 text-sm font-medium text-white disabled:cursor-not-allowed disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900"
             >
@@ -559,8 +727,8 @@ export default function SensorDashboard() {
             </button>
             <button
               type="button"
-              onClick={() => stop(def.key)}
-              disabled={!stopFnsRef.current.has(def.key)}
+              onClick={() => stop(def.id)}
+              disabled={!stopFnsRef.current.has(def.id)}
               className="inline-flex h-9 items-center rounded-lg border border-zinc-200 px-3 text-sm font-medium text-zinc-900 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-800 dark:text-zinc-100"
             >
               Stop
@@ -595,11 +763,11 @@ export default function SensorDashboard() {
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-zinc-900 dark:text-zinc-100">
-            Motion + Position Sensors (Web)
+            Motion + Orientation + Location Sensors (Web)
           </h1>
           <p className="mt-2 max-w-3xl text-sm leading-6 text-zinc-600 dark:text-zinc-400">
-            This page starts the motion/orientation/location APIs that are currently supported by your browser and
-            displays live readings.
+            This page starts the browser sensor APIs that map most closely to the Android and iOS motion frameworks and
+            shows live readings.
           </p>
         </div>
 
@@ -636,6 +804,7 @@ export default function SensorDashboard() {
         <ul className="mt-2 list-disc space-y-1 pl-5">
           <li>Most sensor APIs require HTTPS (secure context) on a real device.</li>
           <li>Some browsers gate motion/orientation behind a user permission prompt.</li>
+          <li>On iOS, sensor access often requires a user gesture—use “Start all”.</li>
         </ul>
       </div>
 
@@ -655,14 +824,68 @@ export default function SensorDashboard() {
         </div>
       ) : null}
 
+      <div className="mt-6 rounded-xl border border-zinc-200 bg-white p-4 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-200">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="font-semibold text-zinc-900 dark:text-zinc-100">Overview</div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Chip tone="good">{defs.filter((d) => rows[d.id]?.status === "running").length} running</Chip>
+            <Chip tone="bad">{defs.filter((d) => rows[d.id]?.status === "error").length} errors</Chip>
+            <Chip tone="warn">{defs.filter((d) => rows[d.id]?.status === "unavailable").length} unavailable</Chip>
+          </div>
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          {defs.map((def) => {
+            const row = rows[def.id] || { status: "idle", supported: false };
+            const tone =
+              row.status === "running"
+                ? "good"
+                : row.status === "error"
+                  ? "bad"
+                  : row.status === "unavailable"
+                    ? "warn"
+                    : row.supported
+                      ? "neutral"
+                      : "warn";
+
+            const label =
+              row.status === "running"
+                ? "running"
+                : row.status === "error"
+                  ? "error"
+                  : row.status === "unavailable"
+                    ? "unavailable"
+                    : row.supported
+                      ? "ready"
+                      : "unsupported";
+
+            return (
+              <a
+                key={def.id}
+                href={`#sensor-${def.id}`}
+                className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs text-zinc-900 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900"
+              >
+                <Chip tone={tone}>{label}</Chip>
+                <span className="max-w-[18rem] truncate">{def.label}</span>
+              </a>
+            );
+          })}
+        </div>
+      </div>
+
       <section className="mt-8">
         <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Motion</h2>
         <div className="mt-3 grid gap-4">{motion.map(renderRow)}</div>
       </section>
 
       <section className="mt-10">
-        <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Position</h2>
-        <div className="mt-3 grid gap-4">{position.map(renderRow)}</div>
+        <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Orientation</h2>
+        <div className="mt-3 grid gap-4">{orientation.map(renderRow)}</div>
+      </section>
+
+      <section className="mt-10">
+        <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">Location</h2>
+        <div className="mt-3 grid gap-4">{location.map(renderRow)}</div>
       </section>
     </div>
   );

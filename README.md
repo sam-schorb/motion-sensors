@@ -4,6 +4,11 @@ This is a Next.js (JavaScript) site that reads motion/orientation/location senso
 - Live sensor readings (when available)
 - Errors/permission issues (when blocked)
 
+## Platforms
+
+- Android (Chrome): typically uses the Generic Sensor API (when available).
+- iOS (Safari/Chrome): typically uses `DeviceMotionEvent` / `DeviceOrientationEvent` (Generic Sensor API is usually unavailable).
+
 ## Getting Started
 
 First, run the development server:
