@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata = {
-  title: 'Motion Sense',
+  title: 'Motion Sensors',
   description: 'Visualise motion sensor data.',
 };
 
