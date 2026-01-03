@@ -1,4 +1,8 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+This is a Next.js (JavaScript) site that attempts to read motion + position sensors in the browser and display:
+
+- Which sensors are available on the current device/browser
+- Live sensor readings (when available)
+- Errors/permission issues (when blocked)
 
 ## Getting Started
 
@@ -16,7 +20,18 @@ bun dev
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+For best results on a real phone (HTTPS required for many sensor APIs):
+
+```bash
+npm run dev -- --hostname 0.0.0.0 --experimental-https
+```
+
+Then open `https://<your-lan-ip>:3000` on the phone and accept the self-signed cert.
+
+## Notes
+
+- This project is JavaScript (`app/*.js`). There are no committed `.ts`/`.tsx` files.
+- Next.js may print “Running TypeScript ...” during build even for JavaScript projects.
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
