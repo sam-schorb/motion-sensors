@@ -1,7 +1,7 @@
 import { deriveSliderStep, fmtNumber } from "@/lib/rnbo/params";
 import Chip from "@/app/components/Chip";
 
-export default function RnboParamList({ params, onChange }) {
+export default function RnboParamList({ params, onChange, mappingLabels }) {
   if (!params?.list?.length) {
     return (
       <div className="mt-3 text-sm text-zinc-600 dark:text-zinc-400">
@@ -26,6 +26,9 @@ export default function RnboParamList({ params, onChange }) {
                 <Chip tone={p.connected ? "good" : "warn"}>
                   {p.connected ? "connected" : "missing"}
                 </Chip>
+                {mappingLabels?.[p.id] ? (
+                  <Chip tone="neutral">{mappingLabels[p.id]}</Chip>
+                ) : null}
                 <span className="text-xs text-zinc-500 dark:text-zinc-400">
                   {p.id}
                 </span>
@@ -62,4 +65,3 @@ export default function RnboParamList({ params, onChange }) {
     </div>
   );
 }
-

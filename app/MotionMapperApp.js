@@ -15,7 +15,7 @@ import { createRnboController } from '@/lib/rnbo/controller';
 import { listNumberParamDescriptors } from '@/lib/rnbo/params';
 
 import { createMotionControls } from '@/lib/motionMapper/controls';
-import { createMappingEngine } from '@/lib/motionMapper/mappingEngine';
+import { CONTROL_SOURCES, createMappingEngine } from '@/lib/motionMapper/mappingEngine';
 import {
   getPatchKey,
   loadMappingFromStorage,
@@ -228,6 +228,17 @@ export default function MotionMapperApp() {
     rnboControllerRef.current?.setParamValue(paramId, value);
   };
 
+  const mappingLabels = useMemo(() => {
+    const labels = {};
+    for (const [paramId, spec] of Object.entries(mapping || {})) {
+      const source = spec?.source || 'none';
+      if (source === 'none') continue;
+      const label = CONTROL_SOURCES.find((s) => s.id === source)?.label || source;
+      labels[paramId] = spec?.invert ? `${label} (inv)` : label;
+    }
+    return labels;
+  }, [mapping]);
+
   const onRecalibrate = () => {
     controlsRef.current?.recalibrate();
     setMotionDebug((prev) => ({ ...(prev || {}), note: 'recalibrated', tMs: nowMs() }));
@@ -400,7 +411,11 @@ export default function MotionMapperApp() {
         <div className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
           Sliders still work manually; mapped parameters will also be updated from motion while motion is ON.
         </div>
-        <RnboParamList params={rnboState?.params} onChange={onParamChange} />
+        <RnboParamList
+          params={rnboState?.params}
+          onChange={onParamChange}
+          mappingLabels={mappingLabels}
+        />
       </section>
 
       <SensorOverview defs={SENSOR_DEFS} rows={rows} />
