@@ -329,7 +329,6 @@
       let device = null;
       let gainNode = null;
       let patcher = null;
-      let audioParams = null;
 
       function updateCtxStatus() {
         if (!audioContext) {
@@ -398,7 +397,6 @@
           }
         }
         device = null;
-        audioParams = null;
         els.deviceStatus.textContent = "—";
         els.paramsPanel.style.display = "none";
         els.paramList.innerHTML = "";
@@ -414,66 +412,28 @@
         const { createDevice } = window.RNBO;
         device = await createDevice({ context: audioContext, patcher });
         device.node.connect(gainNode);
-        audioParams = device?.node?.parameters || null;
 
         const rnboVersion = patcher?.desc?.meta?.rnboversion || "unknown";
         els.deviceStatus.textContent = `created • rnbo export version: ${rnboVersion}`;
         log(`Created RNBO device (export rnbo version: ${rnboVersion}).`);
 
-        try {
-          const rnboParamIds = device?.parametersById ? Array.from(device.parametersById.keys()) : [];
-          const audioParamIds = audioParams ? Array.from(audioParams.keys()) : [];
-          log(`RNBO parametersById: ${rnboParamIds.length} ids`);
-          log(`AudioWorklet node.parameters: ${audioParamIds.length} ids`);
-          if (audioParamIds.length) log(`AudioParam ids: ${audioParamIds.join(", ")}`);
-        } catch {
-          // ignore
-        }
-
         renderParameters();
-      }
-
-      function findSignalAudioParam(p) {
-        if (!audioParams) return null;
-        const raw = String(p.paramId || "");
-        const noLead = raw.replace(/^\//, "");
-        const underscore = noLead.replace(/\//g, "_");
-        const slug = noLead.replace(/[^A-Za-z0-9_]/g, "_");
-        const name = String(p.name || "");
-
-        const candidates = [
-          raw,
-          noLead,
-          underscore,
-          slug,
-          `signal_${name}`,
-          `signals_${name}`,
-          name,
-        ].filter(Boolean);
-
-        const seen = new Set();
-        for (const c of candidates) {
-          if (seen.has(c)) continue;
-          seen.add(c);
-          const ap = audioParams.get(c);
-          if (ap) return ap;
-        }
-
-        return null;
       }
 
       function renderParameters() {
         const list = els.paramList;
         list.innerHTML = "";
 
-        const descParams = patcher?.desc?.parameters || [];
+        const allParams = patcher?.desc?.parameters || [];
+        // This export includes extra "ParameterTypeSignal" parameters (e.g. /signals/...) that map to
+        // signal inlets; for this UI we only expose the host-controllable number parameters.
+        const descParams = allParams.filter((p) => p.type === "ParameterTypeNumber" && p.visible !== false);
         els.paramCount.textContent = `${descParams.length} parameters`;
         els.paramsPanel.style.display = "";
 
         for (const p of descParams) {
           const paramId = p.paramId;
           const rnboParam = device?.parametersById?.get(paramId) || null;
-          const signalAudioParam = p.type === "ParameterTypeSignal" ? findSignalAudioParam(p) : null;
 
           const wrapper = document.createElement("div");
           wrapper.className = "param";
@@ -527,20 +487,7 @@
           };
 
           // Initialize to exported initial value where possible.
-          if (p.type === "ParameterTypeSignal") {
-            if (!signalAudioParam) {
-              slider.value = String(p.initialValue ?? p.minimum ?? 0);
-              value.textContent = "Signal AudioParam not found";
-            } else {
-              try {
-                signalAudioParam.value = p.initialValue;
-              } catch {
-                // ignore
-              }
-              slider.value = String(signalAudioParam.value);
-              setValueText(signalAudioParam.value);
-            }
-          } else if (rnboParam) {
+          if (rnboParam) {
             try {
               rnboParam.value = p.initialValue;
             } catch {
@@ -564,16 +511,6 @@
           slider.addEventListener("input", () => {
             const v = Number(slider.value);
             setValueText(v);
-
-            if (p.type === "ParameterTypeSignal") {
-              if (!signalAudioParam) return;
-              try {
-                signalAudioParam.value = v;
-              } catch (err) {
-                log(`Failed setting signal ${paramId}: ${err?.message || err}`);
-              }
-              return;
-            }
 
             if (!rnboParam) return;
             try {
