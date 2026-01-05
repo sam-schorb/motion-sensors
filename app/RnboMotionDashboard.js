@@ -8,6 +8,8 @@ import RnboParamList from '@/app/components/RnboParamList';
 import { createSensorController } from '@/lib/sensors/controller';
 import { SENSOR_DEFS } from '@/lib/sensors/defs';
 import { createRnboController } from '@/lib/rnbo/controller';
+import { createMotionToRnboBridge } from '@/lib/bridge/motionToRnbo';
+import LogPanel from '@/app/components/LogPanel';
 
 function prependLog(prev, line) {
   const next = `${line}\n${prev || ''}`;
@@ -17,6 +19,7 @@ function prependLog(prev, line) {
 export default function RnboMotionDashboard() {
   const sensorControllerRef = useRef(null);
   const rnboControllerRef = useRef(null);
+  const bridgeRef = useRef(null);
 
   const [rows, setRows] = useState({});
   const [env, setEnv] = useState(null);
@@ -25,7 +28,11 @@ export default function RnboMotionDashboard() {
   const [rnboLog, setRnboLog] = useState('');
   const [isStarting, setIsStarting] = useState(false);
 
+  const [motionEnabled, setMotionEnabled] = useState(true);
+  const [motionDebug, setMotionDebug] = useState(null);
+
   useEffect(() => {
+    let lastDebugAt = 0;
     const sensorController = createSensorController({
       defs: SENSOR_DEFS,
       onRowUpdate: (id, patch) => {
@@ -37,6 +44,23 @@ export default function RnboMotionDashboard() {
           },
         }));
       },
+      onReading: (id, reading, tMs) => {
+        const bridge = bridgeRef.current;
+        if (!bridge) return;
+        if (id === 'orientation_quaternion_relative') {
+          bridge.tick({ tMs, quaternion: reading?.quaternion });
+        } else if (id === 'linear_acceleration') {
+          bridge.tick({ tMs, linearAcceleration: reading });
+        } else if (id === 'rotation_rate') {
+          bridge.tick({ tMs, rotationRate: reading });
+        }
+
+        // UI debug updates are throttled separately from the control loop.
+        if (tMs - lastDebugAt >= 120) {
+          lastDebugAt = tMs;
+          setMotionDebug(bridge.getDebugSnapshot());
+        }
+      },
     });
     sensorControllerRef.current = sensorController;
 
@@ -47,12 +71,20 @@ export default function RnboMotionDashboard() {
     });
     rnboControllerRef.current = rnboController;
 
+    const bridge = createMotionToRnboBridge({
+      rnbo: rnboController,
+      onDebug: (d) => setMotionDebug((prev) => ({ ...(prev || {}), ...d })),
+      config: { enabled: true },
+    });
+    bridgeRef.current = bridge;
+
     let cancelled = false;
     setTimeout(() => {
       if (cancelled) return;
       setEnv(sensorController.getEnv());
       setRows(sensorController.getInitialRows());
       setRnboState(rnboController.getState());
+      setMotionDebug(bridge.getDebugSnapshot());
     }, 0);
 
     return () => {
@@ -61,6 +93,10 @@ export default function RnboMotionDashboard() {
       rnboController.destroy();
     };
   }, []);
+
+  useEffect(() => {
+    bridgeRef.current?.setEnabled(motionEnabled);
+  }, [motionEnabled]);
 
   const motion = SENSOR_DEFS.filter((d) => d.category === 'Motion');
   const orientation = SENSOR_DEFS.filter((d) => d.category === 'Orientation');
@@ -91,6 +127,14 @@ export default function RnboMotionDashboard() {
 
   const onParamChange = (paramId, value) => {
     rnboControllerRef.current?.setParamValue(paramId, value);
+  };
+
+  const onRecalibrate = () => {
+    const tMs =
+      typeof performance !== 'undefined' && performance.now
+        ? performance.now()
+        : Date.now();
+    bridgeRef.current?.recalibrate({ tMs });
   };
 
   return (
@@ -147,6 +191,41 @@ export default function RnboMotionDashboard() {
           RNBO parameters
         </h2>
         <RnboParamList params={rnboState?.params} onChange={onParamChange} />
+      </section>
+
+      <section className="mt-10">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+          <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
+            Motion control
+          </h2>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setMotionEnabled((v) => !v)}
+              className="inline-flex h-10 items-center rounded-lg bg-zinc-900 px-4 text-sm font-semibold text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            >
+              {motionEnabled ? 'Motion: ON' : 'Motion: OFF'}
+            </button>
+            <button
+              type="button"
+              onClick={onRecalibrate}
+              className="inline-flex h-10 items-center rounded-lg border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-900 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900"
+            >
+              Recalibrate
+            </button>
+          </div>
+        </div>
+
+        <div className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">
+          Uses relative quaternion baseline → roll/pitch/yaw (mirrored mapping) + linear/rotational
+          magnitude to drive RNBO parameters.
+        </div>
+
+        <LogPanel
+          title="Motion→RNBO debug"
+          text={motionDebug ? JSON.stringify(motionDebug, null, 2) : '—'}
+        />
       </section>
 
       {env ? (
