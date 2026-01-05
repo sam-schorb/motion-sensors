@@ -1,5 +1,5 @@
-import SensorDashboard from "./SensorDashboard";
+import RnboMotionDashboard from "./RnboMotionDashboard";
 
 export default function Home() {
-  return <SensorDashboard />;
+  return <RnboMotionDashboard />;
 }
