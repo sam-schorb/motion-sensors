@@ -1,5 +1,5 @@
-import RnboMotionDashboard from "./RnboMotionDashboard";
+import MotionMapperApp from "./MotionMapperApp";
 
 export default function Home() {
-  return <RnboMotionDashboard />;
+  return <MotionMapperApp />;
 }
