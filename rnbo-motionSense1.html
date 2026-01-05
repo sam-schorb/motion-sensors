@@ -207,10 +207,6 @@
       }
     </style>
 
-    <!-- RNBO.js adapter library (docs/RNBO/RNBO.md)
-         Pin to the export's RNBO version to avoid mismatches. This export is rnbo v1.3.3. -->
-    <script src="https://js.cdn.cycling74.com/rnbo/1.3.3/rnbo.min.js"></script>
-
     <!-- Prevent favicon.ico 404 noise -->
     <link rel="icon" href="data:," />
   </head>
@@ -316,13 +312,15 @@
 
       function setRnboStatus() {
         if (!window.RNBO) {
-          els.rnboStatus.textContent = "RNBO not loaded (check network / CDN script tag)";
+          els.rnboStatus.textContent = "RNBO not loaded (will load after patcher is selected)";
           return false;
         }
-        els.rnboStatus.textContent = "RNBO loaded (global RNBO object available)";
+        els.rnboStatus.textContent = `RNBO loaded (global RNBO object available)${rnboLoadedVersion ? ` v${rnboLoadedVersion}` : ""}`;
         return true;
       }
 
+      // RNBO.js is loaded dynamically based on patcher.desc.meta.rnboversion
+      let rnboLoadedVersion = null;
       setRnboStatus();
 
       let audioContext = null;
@@ -369,6 +367,55 @@
         return await resp.json();
       }
 
+      function getPatcherRnboVersion(p) {
+        const version = p?.desc?.meta?.rnboversion;
+        return typeof version === "string" && version.trim() ? version.trim() : null;
+      }
+
+      function loadScript(src) {
+        return new Promise((resolve, reject) => {
+          const script = document.createElement("script");
+          script.async = true;
+          script.src = src;
+          script.onload = () => resolve();
+          script.onerror = () => reject(new Error(`Failed to load script: ${src}`));
+          document.head.appendChild(script);
+        });
+      }
+
+      async function ensureRnboForPatcher(p) {
+        const required = getPatcherRnboVersion(p);
+        if (!required) {
+          log("Patcher does not specify rnbo version; falling back to RNBO latest.");
+        }
+
+        // If RNBO is already loaded, we can't safely swap versions in the same page.
+        if (window.RNBO) {
+          if (required && rnboLoadedVersion && rnboLoadedVersion !== required) {
+            throw new Error(
+              `RNBO.js v${rnboLoadedVersion} already loaded, but patcher requires v${required}. Reload the page to switch versions.`
+            );
+          }
+          rnboLoadedVersion = rnboLoadedVersion || required;
+          setRnboStatus();
+          return;
+        }
+
+        const versionToLoad = required || "latest";
+        const src =
+          versionToLoad === "latest"
+            ? "https://cdn.cycling74.com/rnbo/latest/rnbo.min.js"
+            : `https://js.cdn.cycling74.com/rnbo/${versionToLoad}/rnbo.min.js`;
+
+        els.rnboStatus.textContent = `Loading RNBO.js v${versionToLoad}…`;
+        await loadScript(src);
+
+        if (!window.RNBO) throw new Error("RNBO loaded but global RNBO object is missing");
+        rnboLoadedVersion = required || "latest";
+        setRnboStatus();
+        log(`Loaded RNBO.js v${rnboLoadedVersion}.`);
+      }
+
       async function loadPatcherFromAnyUrl(urls) {
         let lastErr = null;
         for (const url of urls) {
@@ -403,8 +450,9 @@
       }
 
       async function createDeviceFromPatcher() {
-        if (!window.RNBO) throw new Error("RNBO not loaded");
         if (!patcher) throw new Error("No patcher loaded");
+        await ensureRnboForPatcher(patcher);
+        if (!window.RNBO) throw new Error("RNBO not loaded");
         await ensureAudioContext();
 
         clearDevice();
@@ -541,7 +589,6 @@
 
       els.startAudio.addEventListener("click", async () => {
         try {
-          if (!setRnboStatus()) return;
           await ensureAudioContext();
         } catch (err) {
           log(`Start Audio failed: ${err?.message || err}`);
