@@ -1,10 +1,15 @@
-This is a Next.js (JavaScript) site that reads motion/orientation/location sensors in the browser and displays:
+This is a Next.js (JavaScript) site that:
 
-- Which supported sensor APIs are available on the current device/browser
-- Live sensor readings (when available)
-- Errors/permission issues (when blocked)
+- Loads an RNBO `export.json` patch in the browser
+- Lets you map each RNBO parameter to motion controls (Roll / Pitch / Yaw / LinAcc / RotAcc / None)
+- Runs the patch and shows live sensor + parameter data
 
 ## Platforms
 
 - Android (Chrome): Uses the Generic Sensor API (when available).
-- iOS (Safari/Chrome): Uses `DeviceMotionEvent` / `DeviceOrientationEvent`
+- iOS (Safari/Chrome): Uses `DeviceMotionEvent` / `DeviceOrientationEvent`.
+
+## Dev
+
+- `npm install`
+- `npm run dev` (open `http://localhost:3000`)
