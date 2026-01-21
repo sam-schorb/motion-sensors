@@ -39,6 +39,9 @@ export default function MotionMapperApp() {
   const [patcher, setPatcher] = useState(null);
   const [patchLabel, setPatchLabel] = useState(null);
   const [patchKey, setPatchKey] = useState(null);
+  const [patchOptions, setPatchOptions] = useState([]);
+  const [selectedPatchId, setSelectedPatchId] = useState('');
+  const [patchListError, setPatchListError] = useState(null);
 
   const params = useMemo(() => {
     if (!patcher) return [];
@@ -92,12 +95,52 @@ export default function MotionMapperApp() {
     motionEnabledRef.current = motionEnabled;
   }, [motionEnabled]);
 
-  async function loadDefaultPatch() {
-    const resp = await fetch('/motionSense1/motionSense1.export.json');
-    if (!resp.ok) throw new Error(`Failed to fetch default patch (${resp.status})`);
+  useEffect(() => {
+    let cancelled = false;
+    async function loadPatchList() {
+      try {
+        const resp = await fetch('/api/patches');
+        if (!resp.ok) throw new Error(`Failed to list patches (${resp.status})`);
+        const data = await resp.json();
+        if (cancelled) return;
+        const list = Array.isArray(data?.patches) ? data.patches : [];
+        setPatchListError(null);
+        setPatchOptions(list);
+        if (list.length > 0) {
+          setSelectedPatchId((prev) => prev || list[0].id);
+        }
+      } catch (err) {
+        if (cancelled) return;
+        setPatchListError(err?.message || 'Failed to load patch list');
+        const fallback = [
+          {
+            id: 'motionSense1',
+            label: 'motionSense1',
+            path: '/motionSense1/motionSense1.export.json',
+          },
+        ];
+        setPatchOptions(fallback);
+        setSelectedPatchId((prev) => prev || fallback[0].id);
+      }
+    }
+    loadPatchList();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  async function loadPatchFromUrl(url, label) {
+    const resp = await fetch(url);
+    if (!resp.ok) throw new Error(`Failed to fetch patch (${resp.status})`);
     const json = await resp.json();
     setPatcher(json);
-    setPatchLabel('default: /motionSense1/motionSense1.export.json');
+    setPatchLabel(label || url);
+  }
+
+  async function loadSelectedPatch() {
+    const selected = patchOptions.find((opt) => opt.id === selectedPatchId);
+    if (!selected) throw new Error('No patch selected');
+    await loadPatchFromUrl(selected.path, `bundle: ${selected.path}`);
   }
 
   async function loadPatchFromFile(file) {
@@ -239,6 +282,11 @@ export default function MotionMapperApp() {
     return labels;
   }, [mapping]);
 
+  const selectedPatch = useMemo(
+    () => patchOptions.find((opt) => opt.id === selectedPatchId) || null,
+    [patchOptions, selectedPatchId],
+  );
+
   const onRecalibrate = () => {
     controlsRef.current?.recalibrate();
     setMotionDebug((prev) => ({ ...(prev || {}), note: 'recalibrated', tMs: nowMs() }));
@@ -270,15 +318,41 @@ export default function MotionMapperApp() {
                 <div className="mt-1 text-xs text-zinc-600 dark:text-zinc-400">
                   Loaded: <span className="font-mono">{patchLabel || '—'}</span>
                 </div>
+                {patchListError ? (
+                  <div className="mt-1 text-xs text-rose-600 dark:text-rose-400">
+                    Patch list error: {patchListError}
+                  </div>
+                ) : null}
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
+                <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-zinc-500 dark:text-zinc-400">
+                  <span>Patch</span>
+                  <select
+                    className="h-10 rounded-lg border border-zinc-200 bg-white px-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900"
+                    value={selectedPatchId}
+                    onChange={(e) => setSelectedPatchId(e.target.value)}
+                  >
+                    {patchOptions.length === 0 ? (
+                      <option value="" disabled>
+                        No patches found
+                      </option>
+                    ) : (
+                      patchOptions.map((opt) => (
+                        <option key={opt.id} value={opt.id}>
+                          {opt.label || opt.id}
+                        </option>
+                      ))
+                    )}
+                  </select>
+                </label>
                 <button
                   type="button"
-                  onClick={() => loadDefaultPatch().catch((e) => alert(e.message))}
-                  className="inline-flex h-10 items-center rounded-lg bg-zinc-900 px-4 text-sm font-semibold text-white hover:bg-zinc-800 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
+                  disabled={!selectedPatch}
+                  onClick={() => loadSelectedPatch().catch((e) => alert(e.message))}
+                  className="inline-flex h-10 items-center rounded-lg bg-zinc-900 px-4 text-sm font-semibold text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:opacity-60 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200"
                 >
-                  Load default
+                  Load selected
                 </button>
                 <label className="inline-flex h-10 cursor-pointer items-center rounded-lg border border-zinc-200 bg-white px-4 text-sm font-semibold text-zinc-900 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-100 dark:hover:bg-zinc-900">
                   Choose export.json…
