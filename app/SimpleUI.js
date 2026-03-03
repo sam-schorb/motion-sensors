@@ -106,22 +106,22 @@ function sleep(ms) {
   });
 }
 
-async function waitForFirstReadings({
-  requiredIds,
+async function waitForAnyReading({
+  sensorIds,
   seenReadingsRef,
   timeoutMs = 6500,
   pollIntervalMs = 100,
 }) {
-  if (!requiredIds.length) return true;
+  if (!sensorIds.length) return false;
   const deadline = Date.now() + timeoutMs;
 
   while (Date.now() < deadline) {
-    const allSeen = requiredIds.every((id) => seenReadingsRef.current.has(id));
-    if (allSeen) return true;
+    const anySeen = sensorIds.some((id) => seenReadingsRef.current.has(id));
+    if (anySeen) return true;
     await sleep(pollIntervalMs);
   }
 
-  return requiredIds.every((id) => seenReadingsRef.current.has(id));
+  return sensorIds.some((id) => seenReadingsRef.current.has(id));
 }
 
 function hasUsableReading(sensorId, reading) {
@@ -239,12 +239,12 @@ export default function SimpleUI() {
       await rnboController.start();
       await sensorController.startAll();
 
-      const failedSensorId = requiredSensorIds.find(
-        (id) => sensorRowsRef.current[id]?.status !== 'running',
+      const runningSensorIds = requiredSensorIds.filter(
+        (id) => sensorRowsRef.current[id]?.status === 'running',
       );
 
-      const gotAllReadings = await waitForFirstReadings({
-        requiredIds: requiredSensorIds,
+      const gotAnyReading = await waitForAnyReading({
+        sensorIds: runningSensorIds,
         seenReadingsRef,
       });
 
@@ -258,7 +258,7 @@ export default function SimpleUI() {
         return;
       }
 
-      if (failedSensorId || !gotAllReadings) {
+      if (!runningSensorIds.length || !gotAnyReading) {
         setButtonState('error');
         return;
       }
