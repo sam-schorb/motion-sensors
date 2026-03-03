@@ -236,8 +236,10 @@ export default function SimpleUI() {
       mapperRef.current = mapper;
       sensorControllerRef.current = sensorController;
 
-      await rnboController.start();
+      // On iOS, permission prompts must come directly from a user gesture.
+      // Start sensors first so motion/orientation permission is requested immediately.
       await sensorController.startAll();
+      await rnboController.start();
 
       const runningSensorIds = requiredSensorIds.filter(
         (id) => sensorRowsRef.current[id]?.status === 'running',
