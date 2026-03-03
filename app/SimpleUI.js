@@ -100,6 +100,30 @@ async function teardownRuntime({
   mapperRef.current = null;
 }
 
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
+
+async function waitForFirstReadings({
+  requiredIds,
+  seenReadingsRef,
+  timeoutMs = 2200,
+  pollIntervalMs = 80,
+}) {
+  if (!requiredIds.length) return true;
+  const deadline = Date.now() + timeoutMs;
+
+  while (Date.now() < deadline) {
+    const allSeen = requiredIds.every((id) => seenReadingsRef.current.has(id));
+    if (allSeen) return true;
+    await sleep(pollIntervalMs);
+  }
+
+  return requiredIds.every((id) => seenReadingsRef.current.has(id));
+}
+
 export default function SimpleUI() {
   const [selectedPatchId, setSelectedPatchId] = useState(PATCH_OPTIONS[0].id);
   const [buttonState, setButtonState] = useState('idle'); // idle | starting | running | error
@@ -109,6 +133,8 @@ export default function SimpleUI() {
   const controlsRef = useRef(null);
   const mapperRef = useRef(null);
   const patchCacheRef = useRef(new Map());
+  const sensorRowsRef = useRef({});
+  const seenReadingsRef = useRef(new Set());
   const opIdRef = useRef(0);
 
   const selectedPatch = useMemo(
@@ -152,6 +178,11 @@ export default function SimpleUI() {
       if (opId !== opIdRef.current) return;
 
       const mapping = PATCH_MAPPINGS[selectedPatch.id] || {};
+      const requiredDefs = getRequiredSensorDefs(mapping);
+      const requiredSensorIds = requiredDefs.map((def) => def.id);
+      sensorRowsRef.current = {};
+      seenReadingsRef.current = new Set();
+
       const rnboController = createRnboController({
         patcher,
         patcherLabel: `bundle: ${selectedPatch.path}`,
@@ -163,9 +194,13 @@ export default function SimpleUI() {
         updateHz: 25,
       });
       const sensorController = createSensorController({
-        defs: getRequiredSensorDefs(mapping),
-        onRowUpdate: () => {},
+        defs: requiredDefs,
+        onRowUpdate: (id, patch) => {
+          const prev = sensorRowsRef.current[id] || {};
+          sensorRowsRef.current[id] = { ...prev, ...patch };
+        },
         onReading: (id, reading, tMs) => {
+          if (reading) seenReadingsRef.current.add(id);
           const update = {};
           if (id === 'orientation_quaternion_relative') update.quaternion = reading?.quaternion;
           if (id === 'linear_acceleration') update.linearAcceleration = reading;
@@ -182,6 +217,21 @@ export default function SimpleUI() {
 
       await rnboController.start();
       await sensorController.startAll();
+
+      const failedSensorId = requiredSensorIds.find(
+        (id) => sensorRowsRef.current[id]?.status !== 'running',
+      );
+      if (failedSensorId) {
+        throw new Error(`Required sensor failed to start: ${failedSensorId}`);
+      }
+
+      const gotAllReadings = await waitForFirstReadings({
+        requiredIds: requiredSensorIds,
+        seenReadingsRef,
+      });
+      if (!gotAllReadings) {
+        throw new Error('Required sensor readings were not detected.');
+      }
 
       if (opId !== opIdRef.current) {
         await teardownRuntime({
