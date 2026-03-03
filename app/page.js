@@ -1,5 +1,5 @@
-import MotionMapperApp from "./MotionMapperApp";
+import SimpleUI from "./SimpleUI";
 
 export default function Home() {
-  return <MotionMapperApp />;
+  return <SimpleUI />;
 }
