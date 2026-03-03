@@ -109,8 +109,8 @@ function sleep(ms) {
 async function waitForFirstReadings({
   requiredIds,
   seenReadingsRef,
-  timeoutMs = 2200,
-  pollIntervalMs = 80,
+  timeoutMs = 6500,
+  pollIntervalMs = 100,
 }) {
   if (!requiredIds.length) return true;
   const deadline = Date.now() + timeoutMs;
@@ -122,6 +122,27 @@ async function waitForFirstReadings({
   }
 
   return requiredIds.every((id) => seenReadingsRef.current.has(id));
+}
+
+function hasUsableReading(sensorId, reading) {
+  if (!reading || typeof reading !== 'object') return false;
+
+  if (sensorId === 'orientation_quaternion_relative') {
+    const q = reading.quaternion;
+    return Array.isArray(q) && q.length === 4 && q.every((n) => Number.isFinite(n));
+  }
+
+  if (sensorId === 'linear_acceleration') {
+    return ['x', 'y', 'z'].some((k) => Number.isFinite(reading[k]));
+  }
+
+  if (sensorId === 'rotation_rate') {
+    return ['x', 'y', 'z', 'alphaRadPerSec', 'betaRadPerSec', 'gammaRadPerSec'].some((k) =>
+      Number.isFinite(reading[k]),
+    );
+  }
+
+  return true;
 }
 
 export default function SimpleUI() {
@@ -200,7 +221,7 @@ export default function SimpleUI() {
           sensorRowsRef.current[id] = { ...prev, ...patch };
         },
         onReading: (id, reading, tMs) => {
-          if (reading) seenReadingsRef.current.add(id);
+          if (hasUsableReading(id, reading)) seenReadingsRef.current.add(id);
           const update = {};
           if (id === 'orientation_quaternion_relative') update.quaternion = reading?.quaternion;
           if (id === 'linear_acceleration') update.linearAcceleration = reading;
@@ -221,17 +242,11 @@ export default function SimpleUI() {
       const failedSensorId = requiredSensorIds.find(
         (id) => sensorRowsRef.current[id]?.status !== 'running',
       );
-      if (failedSensorId) {
-        throw new Error(`Required sensor failed to start: ${failedSensorId}`);
-      }
 
       const gotAllReadings = await waitForFirstReadings({
         requiredIds: requiredSensorIds,
         seenReadingsRef,
       });
-      if (!gotAllReadings) {
-        throw new Error('Required sensor readings were not detected.');
-      }
 
       if (opId !== opIdRef.current) {
         await teardownRuntime({
@@ -242,6 +257,12 @@ export default function SimpleUI() {
         });
         return;
       }
+
+      if (failedSensorId || !gotAllReadings) {
+        setButtonState('error');
+        return;
+      }
+
       setButtonState('running');
     } catch (err) {
       console.error('Simple UI start failed', err);
